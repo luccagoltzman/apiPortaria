@@ -15,7 +15,7 @@ async function listar(req, res, next) {
     if (search) {
       where.pessoa = {
         OR: [
-          { nome: { contains: search, mode: 'insensitive' } },
+          { nome: { contains: search } },
           { cpf: { contains: search } },
         ],
       };
@@ -40,7 +40,7 @@ async function listar(req, res, next) {
         },
         skip,
         take: limit,
-        orderBy: { dataCadastro: 'desc' },
+        orderBy: { id: 'desc' },
       }),
       prisma.visitante.count({ where }),
     ]);

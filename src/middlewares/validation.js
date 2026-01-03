@@ -1,4 +1,5 @@
 const { schemas } = require('../utils/validators');
+const { ZodError } = require('zod');
 
 /**
  * Middleware de validação usando Zod
@@ -9,7 +10,7 @@ const validate = (schema) => {
       schema.parse(req.body);
       next();
     } catch (error) {
-      if (error.errors) {
+      if (error instanceof ZodError) {
         return res.status(422).json({
           error: {
             code: 'VALIDATION_ERROR',

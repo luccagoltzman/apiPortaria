@@ -94,6 +94,7 @@ model Morador {
   ativo               Boolean  @default(true)
   notificacoesAtivas  Boolean  @default(true)
   telefoneEmergencia  String?  @db.VarChar(20)
+  dataCadastro        DateTime @default(now())
   
   pessoa              Pessoa   @relation(fields: [pessoaId], references: [id], onDelete: Cascade)
   visitantes          Visitante[]
@@ -119,6 +120,7 @@ model Prestador {
   apartamentosPermitidos Json
   dataValidade         DateTime?
   ativo                Boolean  @default(true)
+  dataCadastro         DateTime @default(now())
   
   pessoa               Pessoa   @relation(fields: [pessoaId], references: [id], onDelete: Cascade)
   
@@ -144,7 +146,7 @@ model RegistroVisita {
   visitante     Visitante @relation(fields: [visitanteId], references: [id])
   morador       Morador?  @relation(fields: [moradorId], references: [id])
   porteiro      Usuario?  @relation(fields: [porteiroId], references: [id])
-  notificacoes  Notificacao[]
+  notificacoes  Notificacao[] @relation("RegistroNotificacao")
   
   @@index([status])
   @@index([dataEntrada])
@@ -223,6 +225,7 @@ model Notificacao {
   metodo        MetodoNotificacao @default(APP)
   
   morador       Morador  @relation(fields: [moradorId], references: [id])
+  registro      RegistroVisita? @relation("RegistroNotificacao", fields: [registroId], references: [id])
   
   @@index([moradorId])
   @@index([lida])
