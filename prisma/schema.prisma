@@ -1,0 +1,244 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id           String   @id @default(uuid())
+  nome         String   @db.VarChar(100)
+  email        String   @unique @db.VarChar(100)
+  senha        String   @db.VarChar(255)
+  tipo         TipoUsuario @default(PORTEIRO)
+  ativo        Boolean  @default(true)
+  ultimoAcesso DateTime?
+  dataCadastro DateTime @default(now())
+  permissoes   Json?
+  
+  registros    RegistroVisita[]
+  blacklistAdicionada Blacklist[]
+  
+  @@map("usuarios")
+}
+
+enum TipoUsuario {
+  ADMIN
+  PORTEIRO
+  MORADOR
+}
+
+model Pessoa {
+  id             String   @id @default(uuid())
+  nome           String   @db.VarChar(100)
+  cpf            String   @unique @db.VarChar(11)
+  dataNascimento DateTime?
+  telefone       String?  @db.VarChar(20)
+  email          String?  @db.VarChar(100)
+  foto           String?
+  dataCadastro   DateTime @default(now())
+  dataAtualizacao DateTime @updatedAt
+  ativo          Boolean  @default(true)
+  
+  visitantes     Visitante[]
+  moradores      Morador[]
+  prestadores    Prestador[]
+  
+  @@map("pessoas")
+}
+
+model Visitante {
+  id            String   @id @default(uuid())
+  pessoaId      String
+  tipo          TipoVisita
+  apartamento   String?  @db.VarChar(20)
+  observacoes   String?  @db.VarChar(500)
+  totalVisitas  Int      @default(0)
+  status        StatusVisitante @default(CADASTRADO)
+  ultimaVisita  DateTime?
+  moradorId     String?
+  
+  pessoa        Pessoa   @relation(fields: [pessoaId], references: [id], onDelete: Cascade)
+  morador       Morador? @relation(fields: [moradorId], references: [id])
+  registros     RegistroVisita[]
+  
+  @@map("visitantes")
+}
+
+enum TipoVisita {
+  VISITA
+  ENTREGA
+  PRESTADOR
+  OUTRO
+}
+
+enum StatusVisitante {
+  CADASTRADO
+  DENTRO
+  FORA
+}
+
+model Morador {
+  id                  String   @id @default(uuid())
+  pessoaId            String   @unique
+  apartamento         String   @db.VarChar(20)
+  bloco               String?  @db.VarChar(20)
+  tipoUnidade         TipoUnidade
+  dataEntrada         DateTime?
+  dataSaida           DateTime?
+  ativo               Boolean  @default(true)
+  notificacoesAtivas  Boolean  @default(true)
+  telefoneEmergencia  String?  @db.VarChar(20)
+  
+  pessoa              Pessoa   @relation(fields: [pessoaId], references: [id], onDelete: Cascade)
+  visitantes          Visitante[]
+  agendamentos        Agendamento[]
+  registros           RegistroVisita[]
+  notificacoes        Notificacao[]
+  
+  @@map("moradores")
+}
+
+enum TipoUnidade {
+  APARTAMENTO
+  CASA
+  SALA
+  LOJA
+}
+
+model Prestador {
+  id                   String   @id @default(uuid())
+  pessoaId             String   @unique
+  empresa              String?  @db.VarChar(100)
+  servico              String   @db.VarChar(100)
+  apartamentosPermitidos Json
+  dataValidade         DateTime?
+  ativo                Boolean  @default(true)
+  
+  pessoa               Pessoa   @relation(fields: [pessoaId], references: [id], onDelete: Cascade)
+  
+  @@map("prestadores")
+}
+
+model RegistroVisita {
+  id            String   @id @default(uuid())
+  visitanteId   String
+  moradorId     String?
+  tipo          TipoVisita
+  apartamento   String   @db.VarChar(20)
+  dataEntrada   DateTime @default(now())
+  dataSaida     DateTime?
+  status        StatusRegistro @default(DENTRO)
+  foto          String?
+  observacoes   String?  @db.VarChar(500)
+  porteiroId    String?
+  metodoEntrada MetodoEntrada
+  qrcodeData    Json?
+  dataCadastro  DateTime @default(now())
+  
+  visitante     Visitante @relation(fields: [visitanteId], references: [id])
+  morador       Morador?  @relation(fields: [moradorId], references: [id])
+  porteiro      Usuario?  @relation(fields: [porteiroId], references: [id])
+  notificacoes  Notificacao[]
+  
+  @@index([status])
+  @@index([dataEntrada])
+  @@index([apartamento])
+  @@map("registros_visita")
+}
+
+enum StatusRegistro {
+  DENTRO
+  FORA
+}
+
+enum MetodoEntrada {
+  DOCUMENTO
+  QRCODE
+  AGENDAMENTO
+  MANUAL
+}
+
+model Agendamento {
+  id            String   @id @default(uuid())
+  nomeVisitante String   @db.VarChar(100)
+  cpfVisitante  String?  @db.VarChar(11)
+  telefone      String?  @db.VarChar(20)
+  apartamento   String   @db.VarChar(20)
+  moradorId     String
+  dataHora      DateTime
+  tipo          TipoVisita
+  observacoes   String?  @db.VarChar(500)
+  status        StatusAgendamento @default(PENDENTE)
+  qrcodeGerado  Boolean  @default(false)
+  qrcodeData    Json?
+  dataCriacao   DateTime @default(now())
+  dataAtualizacao DateTime @updatedAt
+  
+  morador       Morador  @relation(fields: [moradorId], references: [id])
+  
+  @@index([status])
+  @@index([dataHora])
+  @@index([apartamento])
+  @@map("agendamentos")
+}
+
+enum StatusAgendamento {
+  PENDENTE
+  CONFIRMADO
+  CANCELADO
+  CONCLUIDO
+}
+
+model Blacklist {
+  id            String   @id @default(uuid())
+  cpf           String   @unique @db.VarChar(11)
+  nome          String   @db.VarChar(100)
+  motivo        String   @db.VarChar(500)
+  dataAdicao    DateTime @default(now())
+  adicionadoPor String
+  ativo         Boolean  @default(true)
+  dataRemocao   DateTime?
+  
+  adicionadoPorUsuario Usuario @relation(fields: [adicionadoPor], references: [id])
+  
+  @@map("blacklist")
+}
+
+model Notificacao {
+  id            String   @id @default(uuid())
+  moradorId     String
+  tipo          TipoNotificacao
+  titulo        String   @db.VarChar(100)
+  mensagem      String   @db.Text
+  registroId    String?
+  lida          Boolean  @default(false)
+  dataEnvio     DateTime @default(now())
+  dataLeitura   DateTime?
+  metodo        MetodoNotificacao @default(APP)
+  
+  morador       Morador  @relation(fields: [moradorId], references: [id])
+  
+  @@index([moradorId])
+  @@index([lida])
+  @@map("notificacoes")
+}
+
+enum TipoNotificacao {
+  VISITA
+  ENTREGA
+  AGENDAMENTO
+  SISTEMA
+}
+
+enum MetodoNotificacao {
+  APP
+  EMAIL
+  SMS
+  WHATSAPP
+}
