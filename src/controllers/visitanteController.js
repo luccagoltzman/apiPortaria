@@ -1,46 +1,41 @@
 const prisma = require('../config/database');
 const { validarCPF } = require('../utils/validators');
 const blacklistService = require('../services/blacklistService');
+const imageService = require('../services/imageService');
 
 /**
  * GET /api/visitantes
  */
 async function listar(req, res, next) {
   try {
-    const { search, status, tipo } = req.query;
+    const { search, status } = req.query;
     const { page, limit, skip } = req.pagination;
 
     const where = {};
 
     if (search) {
-      where.pessoa = {
-        OR: [
-          { nome: { contains: search } },
-          { cpf: { contains: search } },
-        ],
-      };
+      where.OR = [
+        { nome: { contains: search } },
+        { cpf: { contains: search } },
+      ];
     }
 
     if (status) {
       where.status = status;
     }
 
-    if (tipo) {
-      where.tipo = tipo;
-    }
-
     const [data, total] = await Promise.all([
       prisma.visitante.findMany({
         where,
         include: {
-          pessoa: true,
-          morador: {
-            include: { pessoa: true },
+          registros: {
+            orderBy: { dataEntrada: 'desc' },
+            take: 5,
           },
         },
         skip,
         take: limit,
-        orderBy: { id: 'desc' },
+        orderBy: { dataCadastro: 'desc' },
       }),
       prisma.visitante.count({ where }),
     ]);
@@ -69,13 +64,8 @@ async function buscarPorId(req, res, next) {
     const visitante = await prisma.visitante.findUnique({
       where: { id },
       include: {
-        pessoa: true,
-        morador: {
-          include: { pessoa: true },
-        },
         registros: {
           orderBy: { dataEntrada: 'desc' },
-          take: 10,
         },
       },
     });
@@ -112,24 +102,17 @@ async function buscarPorCPF(req, res, next) {
       });
     }
 
-    const pessoa = await prisma.pessoa.findUnique({
+    const visitante = await prisma.visitante.findUnique({
       where: { cpf: cpfLimpo },
       include: {
-        visitantes: {
-          include: {
-            morador: {
-              include: { pessoa: true },
-            },
-          },
+        registros: {
+          orderBy: { dataEntrada: 'desc' },
+          take: 10,
         },
       },
     });
 
-    if (!pessoa || pessoa.visitantes.length === 0) {
-      return res.json({ data: null });
-    }
-
-    res.json({ data: pessoa.visitantes[0] });
+    res.json({ data: visitante });
   } catch (error) {
     next(error);
   }
@@ -140,8 +123,26 @@ async function buscarPorCPF(req, res, next) {
  */
 async function criar(req, res, next) {
   try {
-    const dados = req.body;
-    const cpfLimpo = dados.cpf.replace(/\D/g, '');
+    if (!req.file) {
+      return res.status(400).json({
+        error: {
+          code: 'MISSING_FILE',
+          message: 'Foto é obrigatória',
+        },
+      });
+    }
+
+    const { nome, cpf, dataNascimento } = req.body;
+    const cpfLimpo = cpf.replace(/\D/g, '');
+
+    if (!validarCPF(cpfLimpo)) {
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_CPF',
+          message: 'CPF inválido',
+        },
+      });
+    }
 
     // Verificar blacklist
     const { naBlacklist } = await blacklistService.verificarBlacklist(cpfLimpo);
@@ -154,65 +155,41 @@ async function criar(req, res, next) {
       });
     }
 
-    // Verificar se pessoa já existe
-    let pessoa = await prisma.pessoa.findUnique({
+    // Verificar se visitante já existe
+    const visitanteExistente = await prisma.visitante.findUnique({
       where: { cpf: cpfLimpo },
     });
 
-    if (!pessoa) {
-      // Criar pessoa
-      pessoa = await prisma.pessoa.create({
-        data: {
-          nome: dados.nome,
-          cpf: cpfLimpo,
-          dataNascimento: dados.dataNascimento ? new Date(dados.dataNascimento) : null,
-          telefone: dados.telefone,
-          email: dados.email || null,
-          foto: req.file ? `/uploads/${req.file.filename}` : null,
-        },
-      });
-    } else {
-      // Atualizar pessoa se necessário
-      pessoa = await prisma.pessoa.update({
-        where: { id: pessoa.id },
-        data: {
-          nome: dados.nome,
-          dataNascimento: dados.dataNascimento ? new Date(dados.dataNascimento) : pessoa.dataNascimento,
-          telefone: dados.telefone || pessoa.telefone,
-          email: dados.email || pessoa.email,
-          foto: req.file ? `/uploads/${req.file.filename}` : pessoa.foto,
-        },
-      });
-    }
-
-    // Criar ou atualizar visitante
-    const visitanteExistente = await prisma.visitante.findFirst({
-      where: { pessoaId: pessoa.id },
-    });
-
-    let visitante;
     if (visitanteExistente) {
-      visitante = await prisma.visitante.update({
-        where: { id: visitanteExistente.id },
-        data: {
-          tipo: dados.tipo,
-          apartamento: dados.apartamento,
-          observacoes: dados.observacoes,
+      return res.status(409).json({
+        error: {
+          code: 'DUPLICATE_ENTRY',
+          message: 'Visitante já cadastrado',
         },
-        include: { pessoa: true },
-      });
-    } else {
-      visitante = await prisma.visitante.create({
-        data: {
-          pessoaId: pessoa.id,
-          tipo: dados.tipo,
-          apartamento: dados.apartamento,
-          observacoes: dados.observacoes,
-          moradorId: dados.moradorId || null,
-        },
-        include: { pessoa: true },
       });
     }
+
+    // Gerar ID temporário para processar imagem
+    const tempId = `temp_${Date.now()}`;
+    
+    // Processar imagem
+    const { path: fotoPath, thumbnailPath } = await imageService.processarImagemVisitante(
+      req.file.buffer,
+      tempId,
+      'visitantes'
+    );
+
+    // Criar visitante
+    const visitante = await prisma.visitante.create({
+      data: {
+        nome,
+        cpf: cpfLimpo,
+        dataNascimento: dataNascimento ? new Date(dataNascimento) : null,
+        foto: fotoPath,
+        thumbnailUrl: thumbnailPath,
+        tipo: 'VISITA',
+      },
+    });
 
     res.status(201).json({ data: visitante });
   } catch (error) {
@@ -226,11 +203,10 @@ async function criar(req, res, next) {
 async function atualizar(req, res, next) {
   try {
     const { id } = req.params;
-    const dados = req.body;
+    const { nome, dataNascimento } = req.body;
 
     const visitante = await prisma.visitante.findUnique({
       where: { id },
-      include: { pessoa: true },
     });
 
     if (!visitante) {
@@ -242,27 +218,25 @@ async function atualizar(req, res, next) {
       });
     }
 
-    // Atualizar pessoa
-    if (dados.nome || dados.telefone || dados.email) {
-      await prisma.pessoa.update({
-        where: { id: visitante.pessoaId },
-        data: {
-          nome: dados.nome || visitante.pessoa.nome,
-          telefone: dados.telefone || visitante.pessoa.telefone,
-          email: dados.email || visitante.pessoa.email,
-        },
-      });
+    const updateData = {
+      nome: nome || visitante.nome,
+      dataNascimento: dataNascimento ? new Date(dataNascimento) : visitante.dataNascimento,
+    };
+
+    // Se nova foto foi enviada, processar
+    if (req.file) {
+      const { path: fotoPath, thumbnailPath } = await imageService.processarImagemVisitante(
+        req.file.buffer,
+        id,
+        'visitantes'
+      );
+      updateData.foto = fotoPath;
+      updateData.thumbnailUrl = thumbnailPath;
     }
 
-    // Atualizar visitante
     const visitanteAtualizado = await prisma.visitante.update({
       where: { id },
-      data: {
-        tipo: dados.tipo || visitante.tipo,
-        apartamento: dados.apartamento || visitante.apartamento,
-        observacoes: dados.observacoes || visitante.observacoes,
-      },
-      include: { pessoa: true },
+      data: updateData,
     });
 
     res.json({ data: visitanteAtualizado });

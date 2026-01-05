@@ -1,6 +1,6 @@
 # Sistema de Portaria Digital - Backend API
 
-Backend completo para gerenciamento de portarias automatizadas em condomínios comerciais e residenciais.
+Backend para gerenciamento de portarias automatizadas em **prédios comerciais**. O sistema automatiza o processo de entrada/saída de visitantes através de escaneamento de documentos (CNH/RG) e captura de foto facial.
 
 ## 🚀 Tecnologias
 
@@ -9,7 +9,8 @@ Backend completo para gerenciamento de portarias automatizadas em condomínios c
 - **JWT** para autenticação
 - **Zod** para validação
 - **Multer** para upload de arquivos
-- **QRCode** para geração de códigos QR
+- **Sharp** para processamento de imagens
+- **bcrypt** para hash de senhas
 
 ## 📋 Pré-requisitos
 
@@ -50,7 +51,7 @@ npm run prisma:generate
 # Executar migrações
 npm run prisma:migrate
 
-# Popular banco com dados iniciais (cria usuário admin)
+# Popular com dados iniciais (usuário admin)
 npm run prisma:seed
 ```
 
@@ -94,21 +95,16 @@ Após executar o seed, os seguintes usuários são criados:
 Resposta:
 ```json
 {
-  "token": "jwt_token",
-  "refreshToken": "refresh_token",
-  "usuario": {
-    "id": "uuid",
-    "nome": "Administrador",
-    "email": "admin@portaria.com",
-    "tipo": "ADMIN"
+  "data": {
+    "token": "jwt_token",
+    "refreshToken": "refresh_token",
+    "usuario": {
+      "id": "uuid",
+      "nome": "Administrador",
+      "email": "admin@portaria.com",
+      "tipo": "ADMIN"
+    }
   }
-}
-```
-
-#### POST /api/auth/refresh
-```json
-{
-  "refreshToken": "refresh_token"
 }
 ```
 
@@ -118,7 +114,7 @@ Resposta:
 - `GET /api/visitantes` - Listar visitantes
 - `GET /api/visitantes/:id` - Buscar por ID
 - `GET /api/visitantes/buscar/:cpf` - Buscar por CPF
-- `POST /api/visitantes` - Criar visitante
+- `POST /api/visitantes` - Criar visitante (com foto obrigatória)
 - `PUT /api/visitantes/:id` - Atualizar visitante
 - `DELETE /api/visitantes/:id` - Deletar visitante
 
@@ -126,42 +122,20 @@ Resposta:
 - `GET /api/registros` - Listar registros
 - `GET /api/registros/:id` - Buscar por ID
 - `GET /api/registros/estatisticas` - Estatísticas
-- `POST /api/registros/entrada` - Registrar entrada
+- `POST /api/registros/entrada` - Registrar entrada (com foto obrigatória)
 - `PUT /api/registros/:id/saida` - Registrar saída
 
-#### Moradores
-- `GET /api/moradores` - Listar moradores
-- `GET /api/moradores/:id` - Buscar por ID
-- `POST /api/moradores` - Criar morador
-- `PUT /api/moradores/:id` - Atualizar morador
-- `DELETE /api/moradores/:id` - Deletar morador
+#### Upload de Fotos
+- `POST /api/upload/foto` - Upload e processamento de foto
 
-#### Agendamentos
-- `GET /api/agendamentos` - Listar agendamentos
-- `GET /api/agendamentos/:id` - Buscar por ID
-- `POST /api/agendamentos` - Criar agendamento
-- `PUT /api/agendamentos/:id` - Atualizar agendamento
-- `DELETE /api/agendamentos/:id` - Deletar agendamento
-- `POST /api/agendamentos/:id/gerar-qrcode` - Gerar QR Code
-
-#### QR Code
-- `POST /api/qrcode/gerar` - Gerar QR Code
-- `POST /api/qrcode/validar` - Validar QR Code
+#### OCR (Processamento de Documentos)
+- `POST /api/ocr/processar` - Processar imagem de documento (CNH/RG)
 
 #### Blacklist
 - `GET /api/blacklist` - Listar blacklist
 - `POST /api/blacklist` - Adicionar à blacklist
 - `DELETE /api/blacklist/:id` - Remover da blacklist
 - `GET /api/blacklist/verificar/:cpf` - Verificar CPF
-
-#### Prestadores
-- `GET /api/prestadores` - Listar prestadores
-- `POST /api/prestadores` - Criar prestador
-
-#### Notificações
-- `GET /api/notificacoes` - Listar notificações
-- `PUT /api/notificacoes/:id/lida` - Marcar como lida
-- `POST /api/notificacoes/enviar` - Enviar notificação
 
 ## 🔐 Autenticação
 
@@ -174,22 +148,26 @@ Authorization: Bearer <seu_token_jwt>
 ## 📝 Permissões
 
 - **ADMIN**: Acesso total ao sistema
-- **PORTEIRO**: Pode criar/ler registros, buscar pessoas
-- **MORADOR**: Apenas leitura de seus próprios dados
+- **PORTEIRO**: Pode criar/ler registros, buscar pessoas, fazer upload de fotos
+
+## 📸 Processamento de Imagens
+
+O sistema processa automaticamente todas as imagens enviadas:
+
+- **Redimensionamento**: 400x400px (mantendo proporção, crop central)
+- **Thumbnail**: 150x150px para listagens
+- **Formato**: JPEG com qualidade 85%
+- **Estrutura**: Organizado por ano/mês (`uploads/visitantes/2024/01/`)
+- **Tamanho máximo**: 5MB
 
 ## 🗄️ Estrutura do Banco de Dados
 
 O sistema utiliza Prisma ORM com MySQL. Os principais modelos são:
 
-- `Usuario` - Usuários do sistema (admin, porteiro, morador)
-- `Pessoa` - Dados base de pessoas
+- `Usuario` - Usuários do sistema (admin, porteiro)
 - `Visitante` - Visitantes cadastrados
-- `Morador` - Moradores do condomínio
-- `Prestador` - Prestadores de serviço
 - `RegistroVisita` - Registros de entrada/saída
-- `Agendamento` - Agendamentos de visitas
 - `Blacklist` - Lista de CPFs bloqueados
-- `Notificacao` - Notificações para moradores
 
 ## 🧪 Testes
 
@@ -214,6 +192,8 @@ npm test
 - Rate limiting
 - Validação de dados com Zod
 - Verificação de blacklist antes de permitir entrada
+- Validação de tipos de arquivo (apenas imagens)
+- Processamento seguro de uploads
 
 ## 📁 Estrutura do Projeto
 
@@ -226,14 +206,18 @@ apiPortaria/
 │   ├── config/
 │   │   ├── database.js    # Configuração Prisma
 │   │   └── upload.js      # Configuração Multer
-│   ├── controllers/      # Controllers da API
-│   ├── middlewares/       # Middlewares (auth, validação, etc)
-│   ├── routes/           # Rotas da API
+│   ├── controllers/       # Controllers da API
+│   ├── middlewares/        # Middlewares (auth, validação, etc)
+│   ├── routes/            # Rotas da API
 │   ├── services/         # Serviços de negócio
-│   ├── utils/            # Utilitários (validação CPF, etc)
-│   └── server.js         # Servidor Express
-├── uploads/             # Arquivos enviados (fotos)
-├── .env.example      # Exemplo de variáveis de ambiente
+│   │   ├── imageService.js # Processamento de imagens
+│   │   └── ...
+│   ├── utils/             # Utilitários (validação CPF, etc)
+│   └── server.js          # Servidor Express
+├── uploads/              # Arquivos enviados (fotos)
+│   ├── visitantes/
+│   └── registros/
+├── .env.example          # Exemplo de variáveis de ambiente
 └── package.json
 ```
 
@@ -245,13 +229,19 @@ Verifique se o MySQL está rodando e se as credenciais no `.env` estão corretas
 ### Erro de migração
 Certifique-se de que o banco de dados existe:
 ```sql
-CREATE DATABASE portaria;
+CREATE DATABASE portaria CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
 ### Erro ao gerar Prisma Client
 Execute:
 ```bash
 npm run prisma:generate
+```
+
+### Erro ao processar imagens
+Certifique-se de que a biblioteca Sharp está instalada:
+```bash
+npm install sharp
 ```
 
 ## 📄 Licença

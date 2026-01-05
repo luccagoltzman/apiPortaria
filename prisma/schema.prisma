@@ -19,7 +19,6 @@ model Usuario {
   ativo        Boolean  @default(true)
   ultimoAcesso DateTime?
   dataCadastro DateTime @default(now())
-  permissoes   Json?
   
   registros    RegistroVisita[]
   blacklistAdicionada Blacklist[]
@@ -30,51 +29,31 @@ model Usuario {
 enum TipoUsuario {
   ADMIN
   PORTEIRO
-  MORADOR
 }
 
-model Pessoa {
+model Visitante {
   id             String   @id @default(uuid())
   nome           String   @db.VarChar(100)
   cpf            String   @unique @db.VarChar(11)
   dataNascimento DateTime?
-  telefone       String?  @db.VarChar(20)
-  email          String?  @db.VarChar(100)
-  foto           String?
+  foto           String   @db.VarChar(500)
+  thumbnailUrl   String?  @db.VarChar(500)
+  tipo           TipoVisita @default(VISITA)
   dataCadastro   DateTime @default(now())
   dataAtualizacao DateTime @updatedAt
-  ativo          Boolean  @default(true)
+  status         StatusVisitante @default(CADASTRADO)
+  totalVisitas   Int      @default(0)
+  ultimaVisita   DateTime?
   
-  visitantes     Visitante[]
-  moradores      Morador[]
-  prestadores    Prestador[]
+  registros      RegistroVisita[]
   
-  @@map("pessoas")
-}
-
-model Visitante {
-  id            String   @id @default(uuid())
-  pessoaId      String
-  tipo          TipoVisita
-  apartamento   String?  @db.VarChar(20)
-  observacoes   String?  @db.VarChar(500)
-  totalVisitas  Int      @default(0)
-  status        StatusVisitante @default(CADASTRADO)
-  ultimaVisita  DateTime?
-  moradorId     String?
-  
-  pessoa        Pessoa   @relation(fields: [pessoaId], references: [id], onDelete: Cascade)
-  morador       Morador? @relation(fields: [moradorId], references: [id])
-  registros     RegistroVisita[]
-  
+  @@index([cpf])
+  @@index([status])
   @@map("visitantes")
 }
 
 enum TipoVisita {
   VISITA
-  ENTREGA
-  PRESTADOR
-  OUTRO
 }
 
 enum StatusVisitante {
@@ -83,74 +62,24 @@ enum StatusVisitante {
   FORA
 }
 
-model Morador {
-  id                  String   @id @default(uuid())
-  pessoaId            String   @unique
-  apartamento         String   @db.VarChar(20)
-  bloco               String?  @db.VarChar(20)
-  tipoUnidade         TipoUnidade
-  dataEntrada         DateTime?
-  dataSaida           DateTime?
-  ativo               Boolean  @default(true)
-  notificacoesAtivas  Boolean  @default(true)
-  telefoneEmergencia  String?  @db.VarChar(20)
-  dataCadastro        DateTime @default(now())
-  
-  pessoa              Pessoa   @relation(fields: [pessoaId], references: [id], onDelete: Cascade)
-  visitantes          Visitante[]
-  agendamentos        Agendamento[]
-  registros           RegistroVisita[]
-  notificacoes        Notificacao[]
-  
-  @@map("moradores")
-}
-
-enum TipoUnidade {
-  APARTAMENTO
-  CASA
-  SALA
-  LOJA
-}
-
-model Prestador {
-  id                   String   @id @default(uuid())
-  pessoaId             String   @unique
-  empresa              String?  @db.VarChar(100)
-  servico              String   @db.VarChar(100)
-  apartamentosPermitidos Json
-  dataValidade         DateTime?
-  ativo                Boolean  @default(true)
-  dataCadastro         DateTime @default(now())
-  
-  pessoa               Pessoa   @relation(fields: [pessoaId], references: [id], onDelete: Cascade)
-  
-  @@map("prestadores")
-}
-
 model RegistroVisita {
   id            String   @id @default(uuid())
   visitanteId   String
-  moradorId     String?
-  tipo          TipoVisita
-  apartamento   String   @db.VarChar(20)
+  foto          String   @db.VarChar(500)
+  thumbnailUrl  String?  @db.VarChar(500)
   dataEntrada   DateTime @default(now())
   dataSaida     DateTime?
   status        StatusRegistro @default(DENTRO)
-  foto          String?
-  observacoes   String?  @db.VarChar(500)
+  metodoEntrada MetodoEntrada @default(DOCUMENTO)
   porteiroId    String?
-  metodoEntrada MetodoEntrada
-  qrcodeData    Json?
   dataCadastro  DateTime @default(now())
   
-  visitante     Visitante @relation(fields: [visitanteId], references: [id])
-  morador       Morador?  @relation(fields: [moradorId], references: [id])
+  visitante     Visitante @relation(fields: [visitanteId], references: [id], onDelete: Cascade)
   porteiro      Usuario?  @relation(fields: [porteiroId], references: [id])
-  notificacoes  Notificacao[] @relation("RegistroNotificacao")
   
   @@index([status])
   @@index([dataEntrada])
-  @@index([apartamento])
+  @@index([visitanteId])
   @@map("registros_visita")
 }
 
@@ -161,40 +90,6 @@ enum StatusRegistro {
 
 enum MetodoEntrada {
   DOCUMENTO
-  QRCODE
-  AGENDAMENTO
-  MANUAL
-}
-
-model Agendamento {
-  id            String   @id @default(uuid())
-  nomeVisitante String   @db.VarChar(100)
-  cpfVisitante  String?  @db.VarChar(11)
-  telefone      String?  @db.VarChar(20)
-  apartamento   String   @db.VarChar(20)
-  moradorId     String
-  dataHora      DateTime
-  tipo          TipoVisita
-  observacoes   String?  @db.VarChar(500)
-  status        StatusAgendamento @default(PENDENTE)
-  qrcodeGerado  Boolean  @default(false)
-  qrcodeData    Json?
-  dataCriacao   DateTime @default(now())
-  dataAtualizacao DateTime @updatedAt
-  
-  morador       Morador  @relation(fields: [moradorId], references: [id])
-  
-  @@index([status])
-  @@index([dataHora])
-  @@index([apartamento])
-  @@map("agendamentos")
-}
-
-enum StatusAgendamento {
-  PENDENTE
-  CONFIRMADO
-  CANCELADO
-  CONCLUIDO
 }
 
 model Blacklist {
@@ -210,38 +105,4 @@ model Blacklist {
   adicionadoPorUsuario Usuario @relation(fields: [adicionadoPor], references: [id])
   
   @@map("blacklist")
-}
-
-model Notificacao {
-  id            String   @id @default(uuid())
-  moradorId     String
-  tipo          TipoNotificacao
-  titulo        String   @db.VarChar(100)
-  mensagem      String   @db.Text
-  registroId    String?
-  lida          Boolean  @default(false)
-  dataEnvio     DateTime @default(now())
-  dataLeitura   DateTime?
-  metodo        MetodoNotificacao @default(APP)
-  
-  morador       Morador  @relation(fields: [moradorId], references: [id])
-  registro      RegistroVisita? @relation("RegistroNotificacao", fields: [registroId], references: [id])
-  
-  @@index([moradorId])
-  @@index([lida])
-  @@map("notificacoes")
-}
-
-enum TipoNotificacao {
-  VISITA
-  ENTREGA
-  AGENDAMENTO
-  SISTEMA
-}
-
-enum MetodoNotificacao {
-  APP
-  EMAIL
-  SMS
-  WHATSAPP
 }

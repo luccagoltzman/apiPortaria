@@ -75,57 +75,12 @@ const schemas = {
     nome: z.string().min(3, 'Nome deve ter no mínimo 3 caracteres').max(100),
     cpf: z.string().refine(validarCPF, 'CPF inválido'),
     dataNascimento: z.string().optional(),
-    telefone: z.string().optional(),
-    email: z.string().email('Email inválido').optional().or(z.literal('')),
-    tipo: z.enum(['VISITA', 'ENTREGA', 'PRESTADOR', 'OUTRO']),
-    apartamento: z.string().optional(),
-    observacoes: z.string().max(500).optional(),
-  }),
-
-  morador: z.object({
-    nome: z.string().min(3).max(100),
-    cpf: z.string().refine(validarCPF, 'CPF inválido'),
-    apartamento: z.string().min(1, 'Apartamento é obrigatório'),
-    bloco: z.string().optional(),
-    tipoUnidade: z.enum(['APARTAMENTO', 'CASA', 'SALA', 'LOJA']),
-    telefone: z.string().optional(),
-    email: z.string().email().optional().or(z.literal('')),
-    dataEntrada: z.string().optional(),
-  }),
-
-  registroEntrada: z.object({
-    visitanteId: z.string().uuid('ID do visitante inválido'),
-    apartamento: z.string().min(1, 'Apartamento é obrigatório'),
-    tipo: z.enum(['VISITA', 'ENTREGA', 'PRESTADOR', 'OUTRO']),
-    observacoes: z.string().max(500).optional(),
-    metodoEntrada: z.enum(['DOCUMENTO', 'QRCODE', 'AGENDAMENTO', 'MANUAL']),
-    qrcodeData: z.any().optional(),
-  }),
-
-  agendamento: z.object({
-    nomeVisitante: z.string().min(3).max(100),
-    cpfVisitante: z.string().refine(validarCPF, 'CPF inválido').optional().or(z.literal('')),
-    telefone: z.string().optional(),
-    apartamento: z.string().min(1),
-    moradorId: z.string().uuid(),
-    dataHora: z.string().datetime(),
-    tipo: z.enum(['VISITA', 'ENTREGA', 'PRESTADOR']),
-    observacoes: z.string().max(500).optional(),
   }),
 
   blacklist: z.object({
     cpf: z.string().refine(validarCPF, 'CPF inválido'),
     nome: z.string().min(3).max(100),
     motivo: z.string().min(10).max(500),
-  }),
-
-  prestador: z.object({
-    nome: z.string().min(3).max(100),
-    cpf: z.string().refine(validarCPF, 'CPF inválido'),
-    empresa: z.string().optional(),
-    servico: z.string().min(1, 'Serviço é obrigatório'),
-    apartamentosPermitidos: z.array(z.string()),
-    dataValidade: z.string().optional(),
   }),
 };
 

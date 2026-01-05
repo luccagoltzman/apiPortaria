@@ -1,28 +1,20 @@
 const prisma = require('../config/database');
 const blacklistService = require('../services/blacklistService');
-const notificacaoService = require('../services/notificacaoService');
-const qrcodeService = require('../services/qrcodeService');
+const imageService = require('../services/imageService');
+const { validarCPF } = require('../utils/validators');
 
 /**
  * GET /api/registros
  */
 async function listar(req, res, next) {
   try {
-    const { status, tipo, dateFrom, dateTo, apartamento } = req.query;
+    const { status, dateFrom, dateTo } = req.query;
     const { page, limit, skip } = req.pagination;
 
     const where = {};
 
     if (status) {
       where.status = status;
-    }
-
-    if (tipo) {
-      where.tipo = tipo;
-    }
-
-    if (apartamento) {
-      where.apartamento = apartamento;
     }
 
     if (dateFrom || dateTo) {
@@ -39,13 +31,14 @@ async function listar(req, res, next) {
       prisma.registroVisita.findMany({
         where,
         include: {
-          visitante: {
-            include: { pessoa: true },
+          visitante: true,
+          porteiro: {
+            select: {
+              id: true,
+              nome: true,
+              email: true,
+            },
           },
-          morador: {
-            include: { pessoa: true },
-          },
-          porteiro: true,
         },
         skip,
         take: limit,
@@ -78,13 +71,14 @@ async function buscarPorId(req, res, next) {
     const registro = await prisma.registroVisita.findUnique({
       where: { id },
       include: {
-        visitante: {
-          include: { pessoa: true },
+        visitante: true,
+        porteiro: {
+          select: {
+            id: true,
+            nome: true,
+            email: true,
+          },
         },
-        morador: {
-          include: { pessoa: true },
-        },
-        porteiro: true,
       },
     });
 
@@ -105,31 +99,101 @@ async function buscarPorId(req, res, next) {
 
 /**
  * POST /api/registros/entrada
+ * Pode receber visitanteId OU criar novo visitante com nome, cpf, dataNascimento
  */
 async function registrarEntrada(req, res, next) {
   try {
-    const { visitanteId, apartamento, tipo, observacoes, metodoEntrada, qrcodeData } = req.body;
-
-    // Buscar visitante
-    const visitante = await prisma.visitante.findUnique({
-      where: { id: visitanteId },
-      include: {
-        pessoa: true,
-        morador: true,
-      },
-    });
-
-    if (!visitante) {
-      return res.status(404).json({
+    if (!req.file) {
+      return res.status(400).json({
         error: {
-          code: 'NOT_FOUND',
-          message: 'Visitante não encontrado',
+          code: 'MISSING_FILE',
+          message: 'Foto facial é obrigatória',
         },
       });
     }
 
-    // Verificar blacklist
-    const { naBlacklist } = await blacklistService.verificarBlacklist(visitante.pessoa.cpf);
+    const { visitanteId, nome, cpf, dataNascimento } = req.body;
+    let visitante;
+
+    // Se visitanteId fornecido, buscar visitante existente
+    if (visitanteId) {
+      visitante = await prisma.visitante.findUnique({
+        where: { id: visitanteId },
+      });
+
+      if (!visitante) {
+        return res.status(404).json({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Visitante não encontrado',
+          },
+        });
+      }
+    } else {
+      // Criar novo visitante
+      if (!nome || !cpf) {
+        return res.status(400).json({
+          error: {
+            code: 'MISSING_DATA',
+            message: 'Nome e CPF são obrigatórios quando visitanteId não é fornecido',
+          },
+        });
+      }
+
+      const cpfLimpo = cpf.replace(/\D/g, '');
+
+      if (!validarCPF(cpfLimpo)) {
+        return res.status(400).json({
+          error: {
+            code: 'INVALID_CPF',
+            message: 'CPF inválido',
+          },
+        });
+      }
+
+      // Verificar blacklist
+      const { naBlacklist } = await blacklistService.verificarBlacklist(cpfLimpo);
+      if (naBlacklist) {
+        return res.status(403).json({
+          error: {
+            code: 'BLACKLISTED',
+            message: 'CPF está na blacklist',
+          },
+        });
+      }
+
+      // Verificar se já existe
+      const existente = await prisma.visitante.findUnique({
+        where: { cpf: cpfLimpo },
+      });
+
+      if (existente) {
+        visitante = existente;
+      } else {
+        // Processar foto do visitante
+        const tempId = `temp_${Date.now()}`;
+        const { path: fotoPath, thumbnailPath } = await imageService.processarImagemVisitante(
+          req.file.buffer,
+          tempId,
+          'visitantes'
+        );
+
+        // Criar visitante
+        visitante = await prisma.visitante.create({
+          data: {
+            nome,
+            cpf: cpfLimpo,
+            dataNascimento: dataNascimento ? new Date(dataNascimento) : null,
+            foto: fotoPath,
+            thumbnailUrl: thumbnailPath,
+            tipo: 'VISITA',
+          },
+        });
+      }
+    }
+
+    // Verificar blacklist novamente
+    const { naBlacklist } = await blacklistService.verificarBlacklist(visitante.cpf);
     if (naBlacklist) {
       return res.status(403).json({
         error: {
@@ -139,67 +203,42 @@ async function registrarEntrada(req, res, next) {
       });
     }
 
-    // Validar QR Code se método for QRCODE
-    if (metodoEntrada === 'QRCODE' && qrcodeData) {
-      const validacao = qrcodeService.validarQRCode(qrcodeData);
-      if (!validacao.valido) {
-        return res.status(400).json({
-          error: {
-            code: 'INVALID_QRCODE',
-            message: validacao.mensagem,
-          },
-        });
-      }
-    }
+    // Processar foto do registro
+    const { path: fotoPath, thumbnailPath } = await imageService.processarImagemVisitante(
+      req.file.buffer,
+      visitante.id,
+      'registros'
+    );
 
     // Criar registro
     const registro = await prisma.registroVisita.create({
       data: {
-        visitanteId,
-        moradorId: visitante.moradorId,
-        tipo,
-        apartamento,
-        observacoes,
-        foto: req.file ? `/uploads/${req.file.filename}` : null,
-        metodoEntrada,
-        qrcodeData: qrcodeData || null,
+        visitanteId: visitante.id,
+        foto: fotoPath,
+        thumbnailUrl: thumbnailPath,
+        metodoEntrada: 'DOCUMENTO',
         porteiroId: req.user?.id || null,
       },
       include: {
-        visitante: {
-          include: { pessoa: true },
-        },
-        morador: {
-          include: { pessoa: true },
-        },
+        visitante: true,
       },
     });
 
     // Atualizar visitante
     await prisma.visitante.update({
-      where: { id: visitanteId },
+      where: { id: visitante.id },
       data: {
         status: 'DENTRO',
         totalVisitas: { increment: 1 },
         ultimaVisita: new Date(),
-        apartamento: apartamento || visitante.apartamento,
       },
     });
 
-    // Enviar notificação
-    let notificacaoEnviada = false;
-    if (visitante.moradorId) {
-      try {
-        await notificacaoService.notificarVisita(visitante.moradorId, registro.id, tipo);
-        notificacaoEnviada = true;
-      } catch (error) {
-        console.error('Erro ao enviar notificação:', error);
-      }
-    }
-
     res.status(201).json({
-      data: registro,
-      notificacaoEnviada,
+      data: {
+        registro,
+        visitante,
+      },
     });
   } catch (error) {
     next(error);
@@ -212,7 +251,6 @@ async function registrarEntrada(req, res, next) {
 async function registrarSaida(req, res, next) {
   try {
     const { id } = req.params;
-    const { observacoes } = req.body;
 
     const registro = await prisma.registroVisita.findUnique({
       where: { id },
@@ -243,14 +281,15 @@ async function registrarSaida(req, res, next) {
       data: {
         status: 'FORA',
         dataSaida: new Date(),
-        observacoes: observacoes || registro.observacoes,
       },
       include: {
-        visitante: {
-          include: { pessoa: true },
-        },
-        morador: {
-          include: { pessoa: true },
+        visitante: true,
+        porteiro: {
+          select: {
+            id: true,
+            nome: true,
+            email: true,
+          },
         },
       },
     });
@@ -300,7 +339,7 @@ async function estatisticas(req, res, next) {
         dateFrom = hoje;
     }
 
-    const [totalVisitas, visitasHoje, dentroAgora, porTipo, visitantesFrequentes] = await Promise.all([
+    const [totalVisitas, visitasHoje, dentroAgora, visitantesFrequentes] = await Promise.all([
       prisma.registroVisita.count({
         where: {
           dataEntrada: { gte: dateFrom },
@@ -315,13 +354,6 @@ async function estatisticas(req, res, next) {
         where: {
           status: 'DENTRO',
         },
-      }),
-      prisma.registroVisita.groupBy({
-        by: ['tipo'],
-        where: {
-          dataEntrada: { gte: dateFrom },
-        },
-        _count: true,
       }),
       prisma.registroVisita.groupBy({
         by: ['visitanteId'],
@@ -345,32 +377,19 @@ async function estatisticas(req, res, next) {
       visitantesFrequentes.map(async (vf) => {
         const visitante = await prisma.visitante.findUnique({
           where: { id: vf.visitanteId },
-          include: { pessoa: true },
         });
         return {
           visitanteId: vf.visitanteId,
-          nome: visitante?.pessoa.nome || 'Desconhecido',
+          nome: visitante?.nome || 'Desconhecido',
           totalVisitas: vf._count.visitanteId,
         };
       })
     );
 
-    const porTipoObj = {
-      VISITA: 0,
-      ENTREGA: 0,
-      PRESTADOR: 0,
-      OUTRO: 0,
-    };
-
-    porTipo.forEach((pt) => {
-      porTipoObj[pt.tipo] = pt._count;
-    });
-
     res.json({
       totalVisitas,
       visitasHoje,
       dentroAgora,
-      porTipo: porTipoObj,
       visitantesFrequentes: visitantesFrequentesComNomes,
     });
   } catch (error) {

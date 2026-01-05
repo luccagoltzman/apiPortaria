@@ -40,7 +40,8 @@ async function main() {
 
   console.log('✅ Usuário porteiro criado:', porteiro.email);
   console.log('   Senha padrão: admin123');
-
+  console.log('');
+  console.log('⚠️  IMPORTANTE: Altere as senhas após o primeiro acesso!');
   console.log('✨ Seed concluído!');
 }
 
