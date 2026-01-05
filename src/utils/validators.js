@@ -68,7 +68,10 @@ function formatarTelefone(telefone) {
 const schemas = {
   login: z.object({
     email: z.string().email('Email inválido'),
-    senha: z.string().min(6, 'Senha deve ter no mínimo 6 caracteres'),
+    password: z.string().min(6, 'Senha deve ter no mínimo 6 caracteres').optional(),
+    senha: z.string().min(6, 'Senha deve ter no mínimo 6 caracteres').optional(),
+  }).refine((data) => data.password || data.senha, {
+    message: 'Password ou senha é obrigatório',
   }),
 
   visitante: z.object({

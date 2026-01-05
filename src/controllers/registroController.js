@@ -8,22 +8,26 @@ const { validarCPF } = require('../utils/validators');
  */
 async function listar(req, res, next) {
   try {
-    const { status, dateFrom, dateTo } = req.query;
+    const { visitanteId, dataInicio, dataFim, tipo } = req.query;
     const { page, limit, skip } = req.pagination;
 
     const where = {};
 
-    if (status) {
-      where.status = status;
+    if (visitanteId) {
+      where.visitanteId = visitanteId;
     }
 
-    if (dateFrom || dateTo) {
+    if (tipo) {
+      where.tipo = tipo;
+    }
+
+    if (dataInicio || dataFim) {
       where.dataEntrada = {};
-      if (dateFrom) {
-        where.dataEntrada.gte = new Date(dateFrom);
+      if (dataInicio) {
+        where.dataEntrada.gte = new Date(dataInicio);
       }
-      if (dateTo) {
-        where.dataEntrada.lte = new Date(dateTo);
+      if (dataFim) {
+        where.dataEntrada.lte = new Date(dataFim);
       }
     }
 
@@ -31,7 +35,13 @@ async function listar(req, res, next) {
       prisma.registroVisita.findMany({
         where,
         include: {
-          visitante: true,
+          visitante: {
+            select: {
+              id: true,
+              nome: true,
+              cpf: true,
+            },
+          },
           porteiro: {
             select: {
               id: true,
@@ -48,13 +58,8 @@ async function listar(req, res, next) {
     ]);
 
     res.json({
+      success: true,
       data,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
     });
   } catch (error) {
     next(error);
@@ -71,7 +76,13 @@ async function buscarPorId(req, res, next) {
     const registro = await prisma.registroVisita.findUnique({
       where: { id },
       include: {
-        visitante: true,
+        visitante: {
+          select: {
+            id: true,
+            nome: true,
+            cpf: true,
+          },
+        },
         porteiro: {
           select: {
             id: true,
@@ -84,6 +95,7 @@ async function buscarPorId(req, res, next) {
 
     if (!registro) {
       return res.status(404).json({
+        success: false,
         error: {
           code: 'NOT_FOUND',
           message: 'Registro não encontrado',
@@ -91,7 +103,7 @@ async function buscarPorId(req, res, next) {
       });
     }
 
-    res.json({ data: registro });
+    res.json({ success: true, data: registro });
   } catch (error) {
     next(error);
   }
@@ -99,103 +111,52 @@ async function buscarPorId(req, res, next) {
 
 /**
  * POST /api/registros/entrada
- * Pode receber visitanteId OU criar novo visitante com nome, cpf, dataNascimento
  */
 async function registrarEntrada(req, res, next) {
   try {
-    if (!req.file) {
+    const { visitanteId, sala, tipo, observacoes } = req.body;
+
+    if (!visitanteId) {
       return res.status(400).json({
+        success: false,
         error: {
-          code: 'MISSING_FILE',
-          message: 'Foto facial é obrigatória',
+          code: 'VALIDATION_ERROR',
+          message: 'visitanteId é obrigatório',
         },
       });
     }
 
-    const { visitanteId, nome, cpf, dataNascimento } = req.body;
-    let visitante;
+    // Buscar visitante
+    const visitante = await prisma.visitante.findUnique({
+      where: { id: visitanteId },
+    });
 
-    // Se visitanteId fornecido, buscar visitante existente
-    if (visitanteId) {
-      visitante = await prisma.visitante.findUnique({
-        where: { id: visitanteId },
+    if (!visitante) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Visitante não encontrado',
+        },
       });
-
-      if (!visitante) {
-        return res.status(404).json({
-          error: {
-            code: 'NOT_FOUND',
-            message: 'Visitante não encontrado',
-          },
-        });
-      }
-    } else {
-      // Criar novo visitante
-      if (!nome || !cpf) {
-        return res.status(400).json({
-          error: {
-            code: 'MISSING_DATA',
-            message: 'Nome e CPF são obrigatórios quando visitanteId não é fornecido',
-          },
-        });
-      }
-
-      const cpfLimpo = cpf.replace(/\D/g, '');
-
-      if (!validarCPF(cpfLimpo)) {
-        return res.status(400).json({
-          error: {
-            code: 'INVALID_CPF',
-            message: 'CPF inválido',
-          },
-        });
-      }
-
-      // Verificar blacklist
-      const { naBlacklist } = await blacklistService.verificarBlacklist(cpfLimpo);
-      if (naBlacklist) {
-        return res.status(403).json({
-          error: {
-            code: 'BLACKLISTED',
-            message: 'CPF está na blacklist',
-          },
-        });
-      }
-
-      // Verificar se já existe
-      const existente = await prisma.visitante.findUnique({
-        where: { cpf: cpfLimpo },
-      });
-
-      if (existente) {
-        visitante = existente;
-      } else {
-        // Processar foto do visitante
-        const tempId = `temp_${Date.now()}`;
-        const { path: fotoPath, thumbnailPath } = await imageService.processarImagemVisitante(
-          req.file.buffer,
-          tempId,
-          'visitantes'
-        );
-
-        // Criar visitante
-        visitante = await prisma.visitante.create({
-          data: {
-            nome,
-            cpf: cpfLimpo,
-            dataNascimento: dataNascimento ? new Date(dataNascimento) : null,
-            foto: fotoPath,
-            thumbnailUrl: thumbnailPath,
-            tipo: 'VISITA',
-          },
-        });
-      }
     }
 
-    // Verificar blacklist novamente
+    // Verificar se visitante já está dentro
+    if (visitante.status === 'DENTRO') {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Visitante já está dentro do prédio',
+        },
+      });
+    }
+
+    // Verificar blacklist
     const { naBlacklist } = await blacklistService.verificarBlacklist(visitante.cpf);
     if (naBlacklist) {
       return res.status(403).json({
+        success: false,
         error: {
           code: 'BLACKLISTED',
           message: 'CPF está na blacklist',
@@ -203,30 +164,71 @@ async function registrarEntrada(req, res, next) {
       });
     }
 
-    // Processar foto do registro
-    const { path: fotoPath, thumbnailPath } = await imageService.processarImagemVisitante(
-      req.file.buffer,
-      visitante.id,
-      'registros'
-    );
+    // Processar foto se fornecida
+    let fotoPath = null;
+    let thumbnailPath = null;
+
+    if (req.file) {
+      // Validar se é arquivo de imagem (não URL)
+      if (typeof req.file === 'string' || (req.file.mimetype && !req.file.mimetype.startsWith('image/'))) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Foto deve ser um arquivo de imagem válido',
+          },
+        });
+      }
+
+      try {
+        const resultado = await imageService.processarImagemVisitante(
+          req.file.buffer,
+          visitante.id,
+          'registros'
+        );
+        fotoPath = resultado.path;
+        thumbnailPath = resultado.thumbnailPath;
+      } catch (imageError) {
+        console.error('Erro ao processar foto do registro:', imageError);
+        return res.status(500).json({
+          success: false,
+          error: {
+            code: 'IMAGE_PROCESSING_ERROR',
+            message: 'Erro ao processar foto do registro',
+          },
+        });
+      }
+    }
 
     // Criar registro
     const registro = await prisma.registroVisita.create({
       data: {
-        visitanteId: visitante.id,
+        visitanteId,
+        tipo: tipo || 'ENTRADA',
+        sala: sala || null,
+        observacoes: observacoes || null,
         foto: fotoPath,
         thumbnailUrl: thumbnailPath,
         metodoEntrada: 'DOCUMENTO',
         porteiroId: req.user?.id || null,
       },
       include: {
-        visitante: true,
+        visitante: {
+          select: {
+            id: true,
+            nome: true,
+            cpf: true,
+            status: true,
+            totalVisitas: true,
+            ultimaVisita: true,
+          },
+        },
       },
     });
 
     // Atualizar visitante
     await prisma.visitante.update({
-      where: { id: visitante.id },
+      where: { id: visitanteId },
       data: {
         status: 'DENTRO',
         totalVisitas: { increment: 1 },
@@ -235,60 +237,90 @@ async function registrarEntrada(req, res, next) {
     });
 
     res.status(201).json({
+      success: true,
       data: {
         registro,
-        visitante,
+        visitante: {
+          id: visitante.id,
+          status: 'DENTRO',
+          totalVisitas: visitante.totalVisitas + 1,
+          ultimaVisita: new Date(),
+        },
       },
     });
   } catch (error) {
+    console.error('Erro ao registrar entrada:', error);
     next(error);
   }
 }
 
 /**
- * PUT /api/registros/:id/saida
+ * POST /api/registros/saida
  */
 async function registrarSaida(req, res, next) {
   try {
-    const { id } = req.params;
+    const { visitanteId, observacoes } = req.body;
 
-    const registro = await prisma.registroVisita.findUnique({
-      where: { id },
-      include: { visitante: true },
+    if (!visitanteId) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'visitanteId é obrigatório',
+        },
+      });
+    }
+
+    // Buscar visitante
+    const visitante = await prisma.visitante.findUnique({
+      where: { id: visitanteId },
     });
 
-    if (!registro) {
+    if (!visitante) {
       return res.status(404).json({
+        success: false,
         error: {
           code: 'NOT_FOUND',
-          message: 'Registro não encontrado',
+          message: 'Visitante não encontrado',
         },
       });
     }
 
-    if (registro.status === 'FORA') {
+    // Buscar último registro de entrada aberto
+    const registroEntrada = await prisma.registroVisita.findFirst({
+      where: {
+        visitanteId,
+        tipo: 'ENTRADA',
+        dataSaida: null,
+      },
+      orderBy: {
+        dataEntrada: 'desc',
+      },
+    });
+
+    if (!registroEntrada) {
       return res.status(400).json({
+        success: false,
         error: {
-          code: 'ALREADY_EXITED',
-          message: 'Saída já registrada',
+          code: 'VALIDATION_ERROR',
+          message: 'Visitante não possui registro de entrada aberto',
         },
       });
     }
 
-    // Atualizar registro
-    const registroAtualizado = await prisma.registroVisita.update({
-      where: { id },
+    // Atualizar registro de entrada com data de saída
+    const registro = await prisma.registroVisita.update({
+      where: { id: registroEntrada.id },
       data: {
-        status: 'FORA',
         dataSaida: new Date(),
+        observacoes: observacoes || registroEntrada.observacoes,
       },
       include: {
-        visitante: true,
-        porteiro: {
+        visitante: {
           select: {
             id: true,
             nome: true,
-            email: true,
+            cpf: true,
           },
         },
       },
@@ -296,14 +328,27 @@ async function registrarSaida(req, res, next) {
 
     // Atualizar visitante
     await prisma.visitante.update({
-      where: { id: registro.visitanteId },
+      where: { id: visitanteId },
       data: {
         status: 'FORA',
       },
     });
 
-    res.json({ data: registroAtualizado });
+    res.json({
+      success: true,
+      data: {
+        registro: {
+          ...registro,
+          tipo: 'SAIDA',
+        },
+        visitante: {
+          id: visitante.id,
+          status: 'FORA',
+        },
+      },
+    });
   } catch (error) {
+    console.error('Erro ao registrar saída:', error);
     next(error);
   }
 }
@@ -343,14 +388,16 @@ async function estatisticas(req, res, next) {
       prisma.registroVisita.count({
         where: {
           dataEntrada: { gte: dateFrom },
+          tipo: 'ENTRADA',
         },
       }),
       prisma.registroVisita.count({
         where: {
           dataEntrada: { gte: hoje },
+          tipo: 'ENTRADA',
         },
       }),
-      prisma.registroVisita.count({
+      prisma.visitante.count({
         where: {
           status: 'DENTRO',
         },
@@ -359,6 +406,7 @@ async function estatisticas(req, res, next) {
         by: ['visitanteId'],
         where: {
           dataEntrada: { gte: dateFrom },
+          tipo: 'ENTRADA',
         },
         _count: {
           visitanteId: true,
@@ -387,10 +435,13 @@ async function estatisticas(req, res, next) {
     );
 
     res.json({
-      totalVisitas,
-      visitasHoje,
-      dentroAgora,
-      visitantesFrequentes: visitantesFrequentesComNomes,
+      success: true,
+      data: {
+        totalVisitas,
+        visitasHoje,
+        dentroAgora,
+        visitantesFrequentes: visitantesFrequentesComNomes,
+      },
     });
   } catch (error) {
     next(error);

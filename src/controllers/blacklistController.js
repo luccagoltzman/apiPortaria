@@ -22,7 +22,7 @@ async function listar(req, res, next) {
       orderBy: { dataAdicao: 'desc' },
     });
 
-    res.json({ data: blacklist });
+    res.json({ success: true, data: blacklist });
   } catch (error) {
     next(error);
   }
@@ -42,10 +42,11 @@ async function adicionar(req, res, next) {
       req.user.id
     );
 
-    res.status(201).json({ data: entrada });
+    res.status(201).json({ success: true, data: entrada });
   } catch (error) {
     if (error.message.includes('já está na blacklist')) {
       return res.status(409).json({
+        success: false,
         error: {
           code: 'DUPLICATE_ENTRY',
           message: error.message,
@@ -65,7 +66,10 @@ async function remover(req, res, next) {
 
     await blacklistService.removerBlacklist(id);
 
-    res.status(204).send();
+    res.json({
+      success: true,
+      message: 'Pessoa removida da blacklist',
+    });
   } catch (error) {
     next(error);
   }
@@ -79,7 +83,7 @@ async function verificar(req, res, next) {
     const { cpf } = req.params;
     const resultado = await blacklistService.verificarBlacklist(cpf);
 
-    res.json(resultado);
+    res.json({ success: true, ...resultado });
   } catch (error) {
     next(error);
   }

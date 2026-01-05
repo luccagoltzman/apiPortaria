@@ -36,7 +36,7 @@ model Visitante {
   nome           String   @db.VarChar(100)
   cpf            String   @unique @db.VarChar(11)
   dataNascimento DateTime?
-  foto           String   @db.VarChar(500)
+  foto           String?  @db.VarChar(500)
   thumbnailUrl   String?  @db.VarChar(500)
   tipo           TipoVisita @default(VISITA)
   dataCadastro   DateTime @default(now())
@@ -46,6 +46,7 @@ model Visitante {
   ultimaVisita   DateTime?
   
   registros      RegistroVisita[]
+  agendamentos   Agendamento[]
   
   @@index([cpf])
   @@index([status])
@@ -65,11 +66,13 @@ enum StatusVisitante {
 model RegistroVisita {
   id            String   @id @default(uuid())
   visitanteId   String
-  foto          String   @db.VarChar(500)
-  thumbnailUrl  String?  @db.VarChar(500)
+  tipo          TipoRegistro @default(ENTRADA)
+  sala          String?  @db.VarChar(100)
   dataEntrada   DateTime @default(now())
   dataSaida     DateTime?
-  status        StatusRegistro @default(DENTRO)
+  observacoes   String?  @db.Text
+  foto          String?  @db.VarChar(500)
+  thumbnailUrl  String?  @db.VarChar(500)
   metodoEntrada MetodoEntrada @default(DOCUMENTO)
   porteiroId    String?
   dataCadastro  DateTime @default(now())
@@ -77,19 +80,43 @@ model RegistroVisita {
   visitante     Visitante @relation(fields: [visitanteId], references: [id], onDelete: Cascade)
   porteiro      Usuario?  @relation(fields: [porteiroId], references: [id])
   
-  @@index([status])
+  @@index([tipo])
   @@index([dataEntrada])
   @@index([visitanteId])
   @@map("registros_visita")
 }
 
-enum StatusRegistro {
-  DENTRO
-  FORA
+enum TipoRegistro {
+  ENTRADA
+  SAIDA
 }
 
 enum MetodoEntrada {
   DOCUMENTO
+}
+
+model Agendamento {
+  id              String   @id @default(uuid())
+  visitanteId     String
+  dataAgendamento DateTime
+  sala            String?  @db.VarChar(100)
+  observacoes     String?  @db.Text
+  status          StatusAgendamento @default(PENDENTE)
+  qrcode          String?  @db.Text
+  dataCadastro    DateTime @default(now())
+  
+  visitante       Visitante @relation(fields: [visitanteId], references: [id], onDelete: Cascade)
+  
+  @@index([visitanteId])
+  @@index([dataAgendamento])
+  @@map("agendamentos")
+}
+
+enum StatusAgendamento {
+  PENDENTE
+  CONFIRMADO
+  CANCELADO
+  CONCLUIDO
 }
 
 model Blacklist {

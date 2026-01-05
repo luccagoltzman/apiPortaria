@@ -53,7 +53,7 @@ async function login(email, senha) {
   return {
     token,
     refreshToken,
-    usuario: {
+    user: {
       id: usuario.id,
       nome: usuario.nome,
       email: usuario.email,

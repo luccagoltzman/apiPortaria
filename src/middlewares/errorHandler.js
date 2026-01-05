@@ -7,6 +7,7 @@ const errorHandler = (err, req, res, next) => {
   // Erro de validação do Prisma
   if (err.code === 'P2002') {
     return res.status(409).json({
+      success: false,
       error: {
         code: 'DUPLICATE_ENTRY',
         message: 'Registro duplicado',
@@ -20,6 +21,7 @@ const errorHandler = (err, req, res, next) => {
   // Erro de registro não encontrado
   if (err.code === 'P2025') {
     return res.status(404).json({
+      success: false,
       error: {
         code: 'NOT_FOUND',
         message: 'Registro não encontrado',
@@ -30,6 +32,7 @@ const errorHandler = (err, req, res, next) => {
   // Erro de validação
   if (err.name === 'ZodError') {
     return res.status(422).json({
+      success: false,
       error: {
         code: 'VALIDATION_ERROR',
         message: 'Erro de validação',
@@ -43,10 +46,14 @@ const errorHandler = (err, req, res, next) => {
   const message = err.message || 'Erro interno do servidor';
 
   return res.status(statusCode).json({
+    success: false,
     error: {
       code: err.code || 'INTERNAL_ERROR',
       message: process.env.NODE_ENV === 'production' ? 'Erro interno do servidor' : message,
-      ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+      ...(process.env.NODE_ENV === 'development' && { 
+        details: err.message,
+        stack: err.stack 
+      }),
     },
   });
 };

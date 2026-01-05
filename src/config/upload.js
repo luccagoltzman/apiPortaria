@@ -14,6 +14,13 @@ const storage = multer.memoryStorage();
 
 // Filtro de arquivos (apenas imagens)
 const fileFilter = (req, file, cb) => {
+  console.log('Multer recebeu arquivo:', {
+    fieldname: file.fieldname,
+    originalname: file.originalname,
+    mimetype: file.mimetype,
+    size: file.size
+  });
+  
   if (!validarTipoImagem(file.mimetype)) {
     return cb(new Error('Apenas imagens são permitidas (JPEG, PNG, WEBP)'));
   }
